@@ -1,0 +1,27 @@
+cff-version: 1.2.0
+message: "Please cite this package and Lang et al. (2010) when used in research."
+title: astrometry-net-engine
+type: software
+version: 1.0.0
+license: GPL-3.0-only
+authors:
+  - family-names: Kouprianov
+    given-names: Vladimir
+    email: v.kouprianov@gmail.com
+repository-code: "https://github.com/vkoupr/astrometry-net-engine"
+url: "https://github.com/vkoupr/astrometry-net-engine"
+references:
+  - type: article
+    title: "Astrometry.net: Blind astrometric calibration of arbitrary astronomical images"
+    authors:
+      - {family-names: Lang, given-names: Dustin}
+      - {family-names: Hogg, given-names: David W.}
+      - {family-names: Mierle, given-names: Keir}
+      - {family-names: Blanton, given-names: Michael}
+      - {family-names: Roweis, given-names: Sam}
+    year: 2010
+    journal: The Astronomical Journal
+    volume: 139
+    start: 1782
+    end: 1800
+    doi: 10.1088/0004-6256/139/5/1782

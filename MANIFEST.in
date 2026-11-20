@@ -1,0 +1,15 @@
+include README.md LICENSE CITATION.cff CHANGELOG.md
+include pyproject.toml setup.py MANIFEST.in *.patch
+recursive-include astrometry_net_engine *.py *.pyi *.i *.c py.typed
+include astrometry.net/LICENSE astrometry.net/CREDITS astrometry.net/README.md
+recursive-include astrometry.net/include *.h *.inc *.ph
+recursive-include astrometry.net/solver *.c *.h *.inc *.ph
+recursive-include astrometry.net/util *.c *.h *.inc *.ph
+recursive-include astrometry.net/libkd *.c *.h *.inc *.ph
+recursive-include astrometry.net/qfits-an *.c *.h *.inc *.ph
+recursive-include astrometry.net/gsl-an *.c *.h *.inc *.ph COPYING* AUTHORS* README*
+recursive-include licenses *
+recursive-include tests *.py *.md *.json
+exclude AGENTS.md
+prune .github
+global-exclude __pycache__ *.py[cod] .git *.fits *.o *.so

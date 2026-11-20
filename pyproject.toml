@@ -1,0 +1,125 @@
+[build-system]
+requires = ["setuptools>=77", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "astrometry-net-engine"
+dynamic = ["version"]
+description = """Independent, cross-platform Python bindings to the Astrometry.net plate-solving engine, \
+producing WCS solutions from pre-extracted source coordinates."""
+readme = "README.md"
+requires-python = ">=3.12"
+license = "GPL-3.0-only"
+license-files = ["LICENSE", "README.md", "licenses/*"]
+authors = [{name = "Vladimir Kouprianov", email = "v.kouprianov@gmail.com"}]
+dependencies = [
+    "numpy>=2.1; python_version < '3.15'",
+    "numpy>=2.5.5; python_version >= '3.15'",
+    "astropy>=6.1.1; python_version < '3.15'",
+    "astropy>=8.0.3; python_version >= '3.15'",
+]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Science/Research",
+    "Intended Audience :: Developers",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: MacOS",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Programming Language :: Python :: 3.15",
+    "Programming Language :: Python :: Implementation :: CPython",
+    "Programming Language :: Python :: Free Threading",
+    "Programming Language :: C",
+    "Topic :: Scientific/Engineering :: Astronomy",
+]
+
+[project.urls]
+Homepage = "https://github.com/vkoupr/astrometry-net-engine"
+Repository = "https://github.com/vkoupr/astrometry-net-engine"
+
+[project.optional-dependencies]
+test = ["pytest>=8"]
+
+[tool.setuptools]
+packages = ["astrometry_net_engine", "astrometry_net_engine.tests"]
+include-package-data = false
+
+[tool.setuptools.package-dir]
+"astrometry_net_engine.tests" = "tests"
+
+[tool.setuptools.package-data]
+astrometry_net_engine = ["*.pyi", "py.typed"]
+"astrometry_net_engine.tests" = ["data/*.json"]
+
+[tool.setuptools.dynamic]
+version = {attr = "astrometry_net_engine.__version__.__version__"}
+
+[tool.pytest.ini_options]
+addopts = "--import-mode=importlib -ra"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+exclude = ["astrometry.net", "astrometry_net_engine/an_engine.py"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.ruff.format]
+quote-style = "double"
+
+[tool.pyright]
+include = ["astrometry_net_engine/__init__.py", "astrometry_net_engine/an_engine.pyi",
+           "setup.py", "tests", ".github/scripts"]
+exclude = ["astrometry.net", "astrometry_net_engine/an_engine.py"]
+pythonVersion = "3.12"
+typeCheckingMode = "standard"
+
+[tool.astrometry-net-engine.release]
+# Shared by the GitHub Actions release matrix and its distribution validator.
+# Replace cp315t with abi3t only after upstream SWIG and the backend support the free-threaded stable ABI.
+abis = ["abi3", "cp314t", "cp315t"]
+
+[tool.astrometry-net-engine.release.targets.abi3]
+python = "3.12"
+engine_abi = "abi3"
+
+[tool.astrometry-net-engine.release.targets.cp314t]
+python = "3.14t"
+engine_abi = "cpython"
+
+# Temporary version-specific target, independent of cp314t and the future stable-ABI configuration below.
+[tool.astrometry-net-engine.release.targets.cp315t]
+python = "3.15t"
+engine_abi = "cpython"
+
+[tool.astrometry-net-engine.release.targets.abi3t]
+python = "3.15t"
+engine_abi = "abi3t"
+
+[tool.cibuildwheel]
+build = ["cp312-*", "cp314t-*", "cp315t-*"]
+skip = ["*-musllinux_*"]
+before-build = "python -m pip install swig==4.4.1"
+test-requires = ["pytest>=8"]
+test-command = """
+python -I -X gil=0 -c "import os, sys, pytest; \
+os.environ['AN_ENGINE_INDEX_CACHE'] = sys.argv[1]; \
+raise SystemExit(pytest.main(['--import-mode=importlib', '--pyargs', 'astrometry_net_engine.tests']))" \
+"{project}/.test-indexes"
+"""
+build-frontend = "build"
+
+[tool.cibuildwheel.environment]
+AN_ENGINE_DOWNLOAD_INDEXES = "1"
+
+[tool.cibuildwheel.macos]
+archs = ["universal2"]
+# CI tests the same repaired artifact on separate native Intel and ARM64 runners before publication.
+test-skip = ["*"]
+repair-wheel-command = "delocate-wheel --require-archs {delocate_archs} -w {dest_dir} -v {wheel}"
+environment = {MACOSX_DEPLOYMENT_TARGET = "11.0", AN_ENGINE_DOWNLOAD_INDEXES = "1"}

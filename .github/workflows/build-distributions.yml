@@ -1,0 +1,305 @@
+name: Build, test, and publish distributions
+
+"on":
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: "Publish after all 15 wheel targets, both native macOS slices, and required checks pass"
+        type: boolean
+        default: false
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  sdist:
+    runs-on: ubuntu-latest
+    outputs:
+      targets: ${{ steps.release-targets.outputs.targets }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: python -m pip install build twine packaging ruff pyright numpy astropy pytest
+      - name: Read active ABI settings
+        id: release-targets
+        run: |
+          python - <<'PY' >> "$GITHUB_OUTPUT"
+          import json
+          import tomllib
+          with open("pyproject.toml", "rb") as stream:
+              configuration = tomllib.load(stream)
+          release = configuration["tool"]["astrometry-net-engine"]["release"]
+          targets = []
+          for abi in release["abis"]:
+              settings = release["targets"][abi]
+              targets.append({"abi": abi, "build": "cp" + settings["python"].replace(".", "") + "-*", **settings})
+          print("targets=" + json.dumps(targets))
+          PY
+      - run: ruff check .
+      - run: pyright --pythonpath python
+      - run: python -m build --sdist
+      - run: python .github/scripts/check_distributions.py dist
+      - run: python -m twine check --strict dist/*
+      - name: Check pinned source tree unchanged
+        run: |
+          # Update this revision and the submodule only when explicitly requested.
+          test "$(git -C astrometry.net rev-parse HEAD)" = "6dd9c056ff382376e1f94c14e9dc72aad68104d3"
+          test -z "$(git -C astrometry.net status --porcelain)"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: source-distribution
+          path: dist/*.tar.gz
+          if-no-files-found: error
+
+  wheels:
+    needs: sdist
+    name: ${{ matrix.platform.name }} / ${{ matrix.target.abi }}
+    runs-on: ${{ matrix.platform.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        target: ${{ fromJSON(needs.sdist.outputs.targets) }}
+        platform:
+          - {name: linux-x86_64, runner: ubuntu-latest, arch: x86_64}
+          - {name: linux-aarch64, runner: ubuntu-24.04-arm, arch: aarch64}
+          - {name: macos-universal2, runner: macos-15-intel, arch: universal2}
+          - {name: windows-amd64, runner: windows-latest, arch: AMD64}
+          - {name: windows-arm64, runner: windows-11-arm, arch: ARM64}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+      - uses: actions/download-artifact@v4
+        with:
+          name: source-distribution
+          path: source-dist
+      - name: Extract the one release sdist
+        shell: bash
+        run: |
+          mkdir source
+          tar -xf source-dist/*.tar.gz --strip-components=1 -C source
+      - uses: actions/cache@v4
+        with:
+          path: .test-indexes
+          key: indexes-4110-v2
+          restore-keys: |
+            indexes-4110-v1
+            indexes-4110-4118-v1
+      - name: Build and repair wheels; test Linux/Windows here, macOS in native jobs below
+        uses: pypa/cibuildwheel@v4.3.5
+        with:
+          package-dir: source
+          output-dir: wheelhouse
+        env:
+          CIBW_ARCHS: ${{ matrix.platform.arch }}
+          CIBW_BUILD: ${{ matrix.target.build }}
+          CIBW_ENVIRONMENT_PASS_LINUX: AN_ENGINE_ABI
+          # The inactive abi3t settings remain separate from the full-API cp315t target.
+          AN_ENGINE_ABI: ${{ matrix.target.engine_abi }}
+          CIBW_ENVIRONMENT: >-
+            AN_ENGINE_ABI=${{ matrix.target.engine_abi }}
+            AN_ENGINE_DOWNLOAD_INDEXES=1
+      - run: python -m pip install twine packaging abi3audit
+      - run: python .github/scripts/check_distributions.py wheelhouse --expected-abi ${{ matrix.target.abi }}
+      - name: Explicit stable ABI audit after wheel repair
+        if: matrix.target.abi == 'abi3'
+        shell: bash
+        run: python -m abi3audit --strict --summary wheelhouse/*.whl
+      - run: python -m twine check --strict wheelhouse/*
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheel-${{ matrix.platform.name }}-${{ matrix.target.abi }}
+          path: wheelhouse/*.whl
+          if-no-files-found: error
+
+  test-macos:
+    needs: [sdist, wheels]
+    name: Native macOS / ${{ matrix.platform.arch }} / ${{ matrix.target.abi }}
+    runs-on: ${{ matrix.platform.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        target: ${{ fromJSON(needs.sdist.outputs.targets) }}
+        platform:
+          - {runner: macos-15-intel, arch: x86_64}
+          - {runner: macos-15, arch: arm64}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.target.python }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: wheel-macos-universal2-${{ matrix.target.abi }}
+          path: wheelhouse
+      - uses: actions/cache@v4
+        with:
+          path: .test-indexes
+          key: indexes-4110-v2
+          restore-keys: |
+            indexes-4110-v1
+            indexes-4110-4118-v1
+      - name: Install the shared universal2 wheel and test the native slice
+        shell: bash
+        env:
+          TEST_ARCH: ${{ matrix.platform.arch }}
+          AN_ENGINE_INDEX_CACHE: ${{ github.workspace }}/.test-indexes
+          AN_ENGINE_DOWNLOAD_INDEXES: "1"
+        run: |
+          python -I -c "import os, platform; assert platform.machine() == os.environ['TEST_ARCH']"
+          python -m pip install wheelhouse/*.whl pytest
+          python -I -X gil=0 -m pytest --import-mode=importlib --pyargs astrometry_net_engine.tests
+
+  test-newer-python:
+    needs: wheels
+    name: Forward compatibility / ${{ matrix.platform.name }} / ${{ matrix.python }}
+    runs-on: ${{ matrix.platform.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.13", "3.14", "3.15"]
+        platform:
+          - {name: linux-x86_64, runner: ubuntu-latest, wheel: linux-x86_64}
+          - {name: linux-aarch64, runner: ubuntu-24.04-arm, wheel: linux-aarch64}
+          - {name: macos-x86_64, runner: macos-15-intel, wheel: macos-universal2}
+          - {name: macos-arm64, runner: macos-15, wheel: macos-universal2}
+          - {name: windows-amd64, runner: windows-latest, wheel: windows-amd64}
+          - {name: windows-arm64, runner: windows-11-arm, wheel: windows-arm64}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: wheel-${{ matrix.platform.wheel }}-abi3
+          path: wheelhouse
+      - uses: actions/cache@v4
+        with:
+          path: .test-indexes
+          key: indexes-4110-v2
+          restore-keys: |
+            indexes-4110-v1
+            indexes-4110-4118-v1
+      - name: Install the stable ABI wheel and run all tests
+        shell: bash
+        run: |
+          python -m pip install wheelhouse/*.whl pytest
+          python -I -m pytest --import-mode=importlib --pyargs astrometry_net_engine.tests
+        env:
+          AN_ENGINE_INDEX_CACHE: ${{ github.workspace }}/.test-indexes
+          AN_ENGINE_DOWNLOAD_INDEXES: "1"
+
+  test-sdist-without-swig:
+    needs: sdist
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - uses: actions/download-artifact@v4
+        with:
+          name: source-distribution
+          path: source-dist
+      - uses: actions/cache@v4
+        with:
+          path: .test-indexes
+          key: indexes-4110-v2
+          restore-keys: |
+            indexes-4110-v1
+            indexes-4110-4118-v1
+      - name: Install from sdist without Git, SWIG, network, or build isolation
+        shell: bash
+        run: |
+          python -m pip install setuptools wheel numpy astropy pytest
+          python_exe="$(command -v python)"
+          compiler_bin="$RUNNER_TEMP/astrometry-compiler-bin"
+          mkdir -p "$compiler_bin"
+          for tool in cc gcc c++ g++ as ld ar ranlib sh; do
+            ln -s "$(command -v "$tool")" "$compiler_bin/$tool"
+          done
+          PATH="$compiler_bin" "$python_exe" -c \
+            "import shutil; assert shutil.which('git') is None; assert shutil.which('swig') is None"
+          PATH="$compiler_bin" "$python_exe" -m pip install \
+            --no-index --no-build-isolation --no-deps source-dist/*.tar.gz
+          python -I -m pytest --import-mode=importlib --pyargs astrometry_net_engine.tests
+        env:
+          AN_ENGINE_INDEX_CACHE: ${{ github.workspace }}/.test-indexes
+          AN_ENGINE_DOWNLOAD_INDEXES: "1"
+
+  validate-release:
+    needs: [sdist, wheels, test-macos, test-newer-python, test-sdist-without-swig]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: wheel-*
+          path: dist
+          merge-multiple: true
+      - uses: actions/download-artifact@v4
+        with:
+          name: source-distribution
+          path: dist
+      - run: python -m pip install twine packaging
+      - name: Validate collected distributions and complete release matrix
+        shell: bash
+        env:
+          RELEASE_REQUIRED: ${{ startsWith(github.ref, 'refs/tags/v') || inputs.publish }}
+          RELEASE_TAG: ${{ github.ref_name }}
+          TAG_BUILD: ${{ startsWith(github.ref, 'refs/tags/v') }}
+        run: |
+          if [ "$RELEASE_REQUIRED" = "true" ]; then
+            python .github/scripts/check_distributions.py dist --release
+          else
+            python .github/scripts/check_distributions.py dist
+          fi
+          if [ "$TAG_BUILD" = "true" ]; then
+            test "$RELEASE_TAG" = "v1.0.0"
+          fi
+          python -m twine check --strict dist/*
+      - uses: actions/upload-artifact@v4
+        with:
+          name: validated-distributions
+          path: dist/*
+          if-no-files-found: error
+
+  publish:
+    needs: validate-release
+    if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.publish)
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/project/astrometry-net-engine/
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: validated-distributions
+          path: dist
+      - uses: pypa/gh-action-pypi-publish@release/v1

@@ -1,0 +1,2202 @@
+diff --git a/catalogs/2mass.c b/catalogs/2mass.c
+index 194318f..f8ee27a 100644
+--- a/catalogs/2mass.c
++++ b/catalogs/2mass.c
+@@ -93,8 +93,8 @@ static int parse_cc_flag(char flag, char* val) {
+ #define ensure(c, f) { if (c!='|') { fprintf(stderr, "Expected '|' following field %s in 2MASS line.\n", f); return -1; }}
+ 
+ //#define printval printf
+-//#define printval(s,args...) printf(s,args)
+-#define printval(s,args...) {}
++//#define printval(s, ...) printf(s, __VA_ARGS__)
++#define printval(...) ((void)0)
+ 
+ int twomass_cc_flag(unsigned char val, unsigned char flag) {
+     return (val == flag);
+@@ -565,4 +565,3 @@ int twomass_parse_entry(struct twomass_entry* e, const char* line) {
+ 
+     return 0;
+ }
+-
+diff --git a/include/arpa/inet.h b/include/arpa/inet.h
+new file mode 100644
+index 0000000..6507762
+--- /dev/null
++++ b/include/arpa/inet.h
+@@ -0,0 +1,37 @@
++#ifndef ASTROMETRY_WINDOWS_ARPA_INET_H
++#define ASTROMETRY_WINDOWS_ARPA_INET_H
++
++#if !defined(_WIN32)
++#include_next <arpa/inet.h>
++#else
++
++#include <stdint.h>
++#include <stdlib.h>
++
++static __inline uint16_t astrometry_bswap16(uint16_t x) {
++    return (uint16_t)((x << 8) | (x >> 8));
++}
++
++static __inline uint32_t astrometry_bswap32(uint32_t x) {
++    return ((x & 0x000000ffU) << 24) |
++           ((x & 0x0000ff00U) << 8)  |
++           ((x & 0x00ff0000U) >> 8)  |
++           ((x & 0xff000000U) >> 24);
++}
++
++#ifndef htons
++#define htons(x) astrometry_bswap16((uint16_t)(x))
++#endif
++#ifndef ntohs
++#define ntohs(x) astrometry_bswap16((uint16_t)(x))
++#endif
++#ifndef htonl
++#define htonl(x) astrometry_bswap32((uint32_t)(x))
++#endif
++#ifndef ntohl
++#define ntohl(x) astrometry_bswap32((uint32_t)(x))
++#endif
++
++#endif
++
++#endif
+diff --git a/include/astrometry/an-endian.h b/include/astrometry/an-endian.h
+index beb49b9..de369a9 100644
+--- a/include/astrometry/an-endian.h
++++ b/include/astrometry/an-endian.h
+@@ -9,7 +9,38 @@
+ 
+ // MacOSX doesn't have endian.h
+ // (actually 10.5 does)
+-#if __APPLE__
++#if defined(_WIN32)
++# ifndef __LITTLE_ENDIAN
++#  define __LITTLE_ENDIAN 1234
++# endif
++# ifndef __BIG_ENDIAN
++#  define __BIG_ENDIAN 4321
++# endif
++# ifndef __PDP_ENDIAN
++#  define __PDP_ENDIAN 3412
++# endif
++# ifndef __BYTE_ORDER
++#  define __BYTE_ORDER __LITTLE_ENDIAN
++# endif
++# ifndef _LITTLE_ENDIAN
++#  define _LITTLE_ENDIAN __LITTLE_ENDIAN
++# endif
++# ifndef _BIG_ENDIAN
++#  define _BIG_ENDIAN __BIG_ENDIAN
++# endif
++# ifndef _BYTE_ORDER
++#  define _BYTE_ORDER __BYTE_ORDER
++# endif
++# ifndef LITTLE_ENDIAN
++#  define LITTLE_ENDIAN __LITTLE_ENDIAN
++# endif
++# ifndef BIG_ENDIAN
++#  define BIG_ENDIAN __BIG_ENDIAN
++# endif
++# ifndef BYTE_ORDER
++#  define BYTE_ORDER __BYTE_ORDER
++# endif
++#elif __APPLE__
+ # include <sys/types.h>
+ #elif __FreeBSD__
+ # include <sys/endian.h>
+diff --git a/include/astrometry/errors.h b/include/astrometry/errors.h
+index d1dd92b..6ec690d 100644
+--- a/include/astrometry/errors.h
++++ b/include/astrometry/errors.h
+@@ -55,9 +55,12 @@ ATTRIB_FORMAT(printf,4,5)
+ 
+ void report_errno(void);
+ 
+-#define ERROR(fmt, ...) report_error(__FILE__, __LINE__, __func__, fmt, ##__VA_ARGS__)
++#ifdef ERROR
++#undef ERROR
++#endif
++#define ERROR(...) report_error(__FILE__, __LINE__, __func__, __VA_ARGS__)
+ 
+-#define SYSERROR(fmt, ...) do { report_errno(); report_error(__FILE__, __LINE__, __func__, fmt, ##__VA_ARGS__); } while(0)
++#define SYSERROR(...) do { report_errno(); report_error(__FILE__, __LINE__, __func__, __VA_ARGS__); } while(0)
+ 
+ void errors_log_to(FILE* f);
+ 
+@@ -130,4 +133,3 @@ char* error_get_errs(err_t* e, const char* separator);
+ 
+ 
+ #endif
+-
+diff --git a/include/astrometry/keywords.h b/include/astrometry/keywords.h
+index 41212b7..f3c0745 100644
+--- a/include/astrometry/keywords.h
++++ b/include/astrometry/keywords.h
+@@ -8,6 +8,10 @@
+ #ifndef ASTROMETRY_KEYWORDS_H
+ #define ASTROMETRY_KEYWORDS_H
+ 
++#if defined(_MSC_VER) && !defined(__attribute__)
++#define __attribute__(x)
++#endif
++
+ #define ATTRIB_FORMAT(style,fmt,start) __attribute__ ((format(style,fmt,start)))
+ 
+ // this snippet borrowed from GNU libc features.h:
+@@ -96,6 +100,9 @@
+ 
+ // not gnuc >= 3.0
+ 
++# define InlineDeclare
++# define InlineDefineH
++# define InlineDefineC
+ # define Inline
+ # define Pure
+ # define Const
+diff --git a/include/astrometry/log.h b/include/astrometry/log.h
+index 0135151..01f8a9d 100644
+--- a/include/astrometry/log.h
++++ b/include/astrometry/log.h
+@@ -8,6 +8,13 @@
+ #include <stdio.h>
+ #include <stdarg.h>
+ #include "astrometry/an-bool.h"
++#include "astrometry/keywords.h"
++
++#if defined(_MSC_VER)
++#define LOG_ATTRIB_FORMAT_PRINTF(fmt, start)
++#else
++#define LOG_ATTRIB_FORMAT_PRINTF(fmt, start) __attribute__ ((format (printf, fmt, start)))
++#endif
+ 
+ enum log_level {
+     LOG_NONE,
+@@ -85,28 +92,28 @@ void log_free(log_t* logger);
+ 
+ #define LOG_TEMPLATE(name)                                              \
+     void log_##name(const char* file, int line, const char* func, const char* format, ...) \
+-         __attribute__ ((format (printf, 4, 5)));
++         LOG_ATTRIB_FORMAT_PRINTF(4, 5);
+ LOG_TEMPLATE(logmsg);
+ LOG_TEMPLATE(logerr);
+ LOG_TEMPLATE(logverb);
+ LOG_TEMPLATE(logdebug);
+ 
+ void log_loglevel(enum log_level level, const char* file, int line, const char* func, const char* format, ...)
+-    __attribute__ ((format (printf, 5, 6)));
++    LOG_ATTRIB_FORMAT_PRINTF(5, 6);
+ 
+ 
+ /**
+  * Log a message:
+  */
+ 
+-#define logerr(  x, ...) log_logerr(  __FILE__, __LINE__, __func__, x, ##__VA_ARGS__)
+-#define logmsg(  x, ...) log_logmsg(  __FILE__, __LINE__, __func__, x, ##__VA_ARGS__)
+-#define logverb( x, ...) log_logverb( __FILE__, __LINE__, __func__, x, ##__VA_ARGS__)
+-#define debug(   x, ...) log_logdebug(__FILE__, __LINE__, __func__, x, ##__VA_ARGS__)
+-#define logdebug(x, ...) log_logdebug(__FILE__, __LINE__, __func__, x, ##__VA_ARGS__)
++#define logerr(...) log_logerr(__FILE__, __LINE__, __func__, __VA_ARGS__)
++#define logmsg(...) log_logmsg(__FILE__, __LINE__, __func__, __VA_ARGS__)
++#define logverb(...) log_logverb(__FILE__, __LINE__, __func__, __VA_ARGS__)
++#define debug(...) log_logdebug(__FILE__, __LINE__, __func__, __VA_ARGS__)
++#define logdebug(...) log_logdebug(__FILE__, __LINE__, __func__, __VA_ARGS__)
+ 
+ // log at a particular level.
+-#define loglevel(loglvl, format, ...) log_loglevel(loglvl, __FILE__, __LINE__, __func__, format, ##__VA_ARGS__)
++#define loglevel(loglvl, ...) log_loglevel(loglvl, __FILE__, __LINE__, __func__, __VA_ARGS__)
+ 
+ int log_get_level(void);
+ 
+diff --git a/include/astrometry/os-features.h b/include/astrometry/os-features.h
+index 780c4b9..60f4c23 100644
+--- a/include/astrometry/os-features.h
++++ b/include/astrometry/os-features.h
+@@ -18,6 +18,100 @@
+ #define	MAX(a,b) (((a)>(b))?(a):(b))
+ #endif
+ 
++#if defined(_WIN32)
++#include <errno.h>
++#include <math.h>
++#include <stdarg.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#include <time.h>
++#ifndef strcasecmp
++#define strcasecmp _stricmp
++#endif
++#ifndef strncasecmp
++#define strncasecmp _strnicmp
++#endif
++#ifndef strdup
++#define strdup _strdup
++#endif
++#ifndef va_copy
++#define va_copy(dst, src) ((dst) = (src))
++#endif
++#ifndef vasprintf
++static int astrometry_vasprintf(char** strp, const char* fmt, va_list ap) {
++    va_list ap_copy;
++    char* buf;
++    int n;
++    if (!strp || !fmt) {
++        errno = EINVAL;
++        return -1;
++    }
++    va_copy(ap_copy, ap);
++#if defined(_MSC_VER)
++    n = _vscprintf(fmt, ap_copy);
++#else
++    n = vsnprintf(NULL, 0, fmt, ap_copy);
++#endif
++    va_end(ap_copy);
++    if (n < 0)
++        return -1;
++    buf = malloc((size_t)n + 1U);
++    if (!buf)
++        return -1;
++    if (vsnprintf(buf, (size_t)n + 1U, fmt, ap) < 0) {
++        free(buf);
++        return -1;
++    }
++    *strp = buf;
++    return n;
++}
++#define vasprintf astrometry_vasprintf
++#endif
++#ifndef asprintf
++static int astrometry_asprintf(char** strp, const char* fmt, ...) {
++    int n;
++    va_list ap;
++    va_start(ap, fmt);
++    n = vasprintf(strp, fmt, ap);
++    va_end(ap);
++    return n;
++}
++#define asprintf astrometry_asprintf
++#endif
++#ifndef gmtime_r
++static struct tm* astrometry_gmtime_r(const time_t* t, struct tm* out) {
++    if (!t || !out)
++        return NULL;
++    return (gmtime_s(out, t) == 0) ? out : NULL;
++}
++#define gmtime_r astrometry_gmtime_r
++#endif
++#ifndef localtime_r
++static struct tm* astrometry_localtime_r(const time_t* t, struct tm* out) {
++    if (!t || !out)
++        return NULL;
++    return (localtime_s(out, t) == 0) ? out : NULL;
++}
++#define localtime_r astrometry_localtime_r
++#endif
++#ifndef M_SQRT2
++#define M_SQRT2 1.41421356237309504880
++#endif
++#ifndef M_SQRT1_2
++#define M_SQRT1_2 0.70710678118654752440
++#endif
++#ifndef M_PI
++#define M_PI 3.14159265358979323846
++#endif
++#ifndef M_PI_2
++#define M_PI_2 1.57079632679489661923
++#endif
++#ifndef M_PI_4
++#define M_PI_4 0.78539816339744830962
++#endif
++#endif
++
+ // isfinite() on Solaris; from
+ // https://code.google.com/p/redis/issues/detail?id=20
+ #if defined(__sun) && defined(__GNUC__)
+@@ -52,13 +146,15 @@
+ 
+ 
+ // As suggested in http://gcc.gnu.org/onlinedocs/gcc-4.3.0/gcc/Function-Names.html
+-#if __STDC_VERSION__ < 199901L
++#ifndef __func__
++#if !defined(__STDC_VERSION__) || (__STDC_VERSION__ < 199901L)
+ # if __GNUC__ >= 2
+ #  define __func__ __FUNCTION__
+ # else
+ #  define __func__ "<unknown>"
+ # endif
+ #endif
++#endif
+ 
+ 
+ /**
+diff --git a/include/dirent.h b/include/dirent.h
+new file mode 100644
+index 0000000..0108876
+--- /dev/null
++++ b/include/dirent.h
+@@ -0,0 +1,90 @@
++#ifndef ASTROMETRY_WINDOWS_DIRENT_H
++#define ASTROMETRY_WINDOWS_DIRENT_H
++
++#if !defined(_WIN32)
++#include_next <dirent.h>
++#else
++
++#include <errno.h>
++#include <io.h>
++#include <stdint.h>
++#include <stdlib.h>
++#include <string.h>
++
++#ifndef MAX_PATH
++#define MAX_PATH 260
++#endif
++
++struct dirent {
++    char d_name[MAX_PATH + 1];
++};
++
++typedef struct {
++    intptr_t handle;
++    struct _finddata_t data;
++    struct dirent ent;
++    char pattern[MAX_PATH + 4];
++    int first;
++} DIR;
++
++static __inline DIR* opendir(const char* path) {
++    size_t n;
++    DIR* dir;
++
++    if (!path) {
++        errno = EINVAL;
++        return NULL;
++    }
++
++    dir = (DIR*)calloc(1, sizeof(DIR));
++    if (!dir)
++        return NULL;
++
++    n = strlen(path);
++    if (n > (MAX_PATH - 3)) {
++        free(dir);
++        errno = ENAMETOOLONG;
++        return NULL;
++    }
++
++    strcpy(dir->pattern, path);
++    if (n && path[n - 1] != '\\' && path[n - 1] != '/')
++        strcat(dir->pattern, "\\");
++    strcat(dir->pattern, "*");
++
++    dir->handle = _findfirst(dir->pattern, &dir->data);
++    if (dir->handle == -1L) {
++        free(dir);
++        return NULL;
++    }
++    dir->first = 1;
++    return dir;
++}
++
++static __inline struct dirent* readdir(DIR* dir) {
++    if (!dir)
++        return NULL;
++
++    if (dir->first) {
++        dir->first = 0;
++    } else if (_findnext(dir->handle, &dir->data) != 0) {
++        return NULL;
++    }
++
++    strncpy(dir->ent.d_name, dir->data.name, MAX_PATH);
++    dir->ent.d_name[MAX_PATH] = '\0';
++    return &dir->ent;
++}
++
++static __inline int closedir(DIR* dir) {
++    if (!dir)
++        return -1;
++    if (dir->handle != -1L)
++        _findclose(dir->handle);
++    free(dir);
++    return 0;
++}
++
++#endif
++
++#endif
+diff --git a/include/libgen.h b/include/libgen.h
+new file mode 100644
+index 0000000..96803fd
+--- /dev/null
++++ b/include/libgen.h
+@@ -0,0 +1,47 @@
++#ifndef ASTROMETRY_WINDOWS_LIBGEN_H
++#define ASTROMETRY_WINDOWS_LIBGEN_H
++
++#if !defined(_WIN32)
++#include_next <libgen.h>
++#else
++
++#include <string.h>
++
++static __inline char* basename(char* path) {
++    char* p;
++    if (!path || !*path)
++        return path;
++    p = path + strlen(path);
++    while (p > path && (p[-1] == '/' || p[-1] == '\\'))
++        --p;
++    while (p > path && p[-1] != '/' && p[-1] != '\\')
++        --p;
++    return p;
++}
++
++static __inline char* dirname(char* path) {
++    static char dot[] = ".";
++    char* p;
++    if (!path || !*path)
++        return dot;
++    p = path + strlen(path);
++    while (p > path && (p[-1] == '/' || p[-1] == '\\'))
++        --p;
++    while (p > path && p[-1] != '/' && p[-1] != '\\')
++        --p;
++    if (p == path) {
++        if (*p == '/' || *p == '\\') {
++            p[1] = '\0';
++            return path;
++        }
++        return dot;
++    }
++    while (p > path && (p[-1] == '/' || p[-1] == '\\'))
++        --p;
++    *p = '\0';
++    return path;
++}
++
++#endif
++
++#endif
+diff --git a/include/netinet/in.h b/include/netinet/in.h
+new file mode 100644
+index 0000000..176663b
+--- /dev/null
++++ b/include/netinet/in.h
+@@ -0,0 +1,16 @@
++#ifndef ASTROMETRY_WINDOWS_NETINET_IN_H
++#define ASTROMETRY_WINDOWS_NETINET_IN_H
++
++#if !defined(_WIN32)
++#include_next <netinet/in.h>
++#else
++
++#include <stdint.h>
++#include <arpa/inet.h>
++
++typedef uint16_t in_port_t;
++typedef uint32_t in_addr_t;
++
++#endif
++
++#endif
+diff --git a/include/pthread.h b/include/pthread.h
+new file mode 100644
+index 0000000..f055541
+--- /dev/null
++++ b/include/pthread.h
+@@ -0,0 +1,63 @@
++#ifndef ASTROMETRY_WINDOWS_PTHREAD_H
++#define ASTROMETRY_WINDOWS_PTHREAD_H
++
++#if !defined(_WIN32)
++#include_next <pthread.h>
++#else
++
++/*
++ * Minimal pthread stub for Windows/MSVC, single-threaded builds only.
++ * The astrometry Python extension is single-threaded; full pthread
++ * semantics are not needed.
++ */
++
++#include <stdint.h>
++
++/* ---------- one-time initialisation ---------- */
++typedef volatile int pthread_once_t;
++#define PTHREAD_ONCE_INIT 0
++
++static __inline int pthread_once(pthread_once_t* once, void (*fn)(void)) {
++    if (!*once) { *once = 1; fn(); }
++    return 0;
++}
++
++/* ---------- mutex (no-op on single-threaded Windows) ---------- */
++typedef volatile int pthread_mutex_t;
++#define PTHREAD_MUTEX_INITIALIZER 0
++
++static __inline int pthread_mutex_init(pthread_mutex_t* m, const void* attr) {
++    (void)m; (void)attr; return 0;
++}
++static __inline int pthread_mutex_lock(pthread_mutex_t* m) { (void)m; return 0; }
++static __inline int pthread_mutex_unlock(pthread_mutex_t* m) { (void)m; return 0; }
++static __inline int pthread_mutex_destroy(pthread_mutex_t* m) { (void)m; return 0; }
++
++/* ---------- thread-local storage ---------- */
++/* pthread_getspecific always returns NULL; callers re-initialise on NULL. */
++typedef int pthread_key_t;
++
++static __inline int pthread_key_create(pthread_key_t* k, void (*dtor)(void*)) {
++    (void)dtor; *k = 0; return 0;
++}
++static __inline void* pthread_getspecific(pthread_key_t k) { (void)k; return NULL; }
++static __inline int pthread_setspecific(pthread_key_t k, const void* val) {
++    (void)k; (void)val; return 0;
++}
++
++/* ---------- thread creation (not used by the extension) ---------- */
++typedef int pthread_t;
++typedef int pthread_attr_t;
++
++static __inline int pthread_attr_init(pthread_attr_t* a) { (void)a; return 0; }
++static __inline int pthread_attr_destroy(pthread_attr_t* a) { (void)a; return 0; }
++static __inline int pthread_create(pthread_t* t, const pthread_attr_t* a,
++                                   void* (*fn)(void*), void* arg) {
++    (void)a; if (t) *t = 0; fn(arg); return 0;
++}
++static __inline int pthread_join(pthread_t t, void** rv) {
++    (void)t; (void)rv; return 0;
++}
++
++#endif /* _WIN32 */
++#endif /* ASTROMETRY_WINDOWS_PTHREAD_H */
+diff --git a/include/pwd.h b/include/pwd.h
+new file mode 100644
+index 0000000..a9d65b4
+--- /dev/null
++++ b/include/pwd.h
+@@ -0,0 +1,19 @@
++#ifndef ASTROMETRY_WINDOWS_PWD_H
++#define ASTROMETRY_WINDOWS_PWD_H
++
++#if !defined(_WIN32)
++#include_next <pwd.h>
++#else
++
++struct passwd {
++    char* pw_name;
++};
++
++static __inline struct passwd* getpwuid(int uid) {
++    (void)uid;
++    return (struct passwd*)0;
++}
++
++#endif
++
++#endif
+diff --git a/include/regex.h b/include/regex.h
+new file mode 100644
+index 0000000..6b99398
+--- /dev/null
++++ b/include/regex.h
+@@ -0,0 +1,80 @@
++#ifndef ASTROMETRY_WINDOWS_REGEX_H
++#define ASTROMETRY_WINDOWS_REGEX_H
++
++#if !defined(_WIN32)
++#include_next <regex.h>
++#else
++
++#include <stddef.h>
++#include <string.h>
++
++typedef struct regex_t {
++    const char *pattern;
++    int cflags;
++} regex_t;
++
++typedef struct regmatch_t {
++    long rm_so;
++    long rm_eo;
++} regmatch_t;
++
++#define REG_EXTENDED 0x01
++#define REG_ICASE 0x02
++#define REG_NOSUB 0x04
++#define REG_NEWLINE 0x08
++
++#define REG_NOMATCH 1
++
++static int regcomp(regex_t *preg, const char *pattern, int cflags) {
++    if (!preg || !pattern)
++        return REG_NOMATCH;
++    preg->pattern = pattern;
++    preg->cflags = cflags;
++    return 0;
++}
++
++static int regexec(
++    const regex_t *preg,
++    const char *string,
++    size_t nmatch,
++    regmatch_t pmatch[],
++    int eflags
++) {
++    const char *p;
++    (void)eflags;
++    if (!preg || !preg->pattern || !string)
++        return REG_NOMATCH;
++
++    p = strstr(string, preg->pattern);
++    if (!p)
++        return REG_NOMATCH;
++
++    if (nmatch > 0 && pmatch) {
++        pmatch[0].rm_so = (long)(p - string);
++        pmatch[0].rm_eo = pmatch[0].rm_so + (long)strlen(preg->pattern);
++    }
++    return 0;
++}
++
++static size_t regerror(int errcode, const regex_t *preg, char *errbuf, size_t errbuf_size) {
++    const char *msg = (errcode == 0) ? "No error" : "No match";
++    size_t len = strlen(msg);
++    (void)preg;
++    if (errbuf && errbuf_size > 0) {
++        size_t copy_len = (len < (errbuf_size - 1)) ? len : (errbuf_size - 1);
++        memcpy(errbuf, msg, copy_len);
++        errbuf[copy_len] = '\0';
++    }
++    return len + 1;
++}
++
++static void regfree(regex_t *preg) {
++    if (preg) {
++        preg->pattern = NULL;
++        preg->cflags = 0;
++    }
++}
++
++#endif
++
++#endif
+diff --git a/include/sys/mman.h b/include/sys/mman.h
+new file mode 100644
+index 0000000..7ffbeef
+--- /dev/null
++++ b/include/sys/mman.h
+@@ -0,0 +1,57 @@
++#ifndef ASTROMETRY_WINDOWS_SYS_MMAN_H
++#define ASTROMETRY_WINDOWS_SYS_MMAN_H
++
++#if !defined(_WIN32)
++#include_next <sys/mman.h>
++#else
++
++#include <errno.h>
++#include <stdlib.h>
++#include <sys/types.h>
++#include <unistd.h>
++
++#define PROT_READ 0x1
++#define PROT_WRITE 0x2
++
++#define MAP_SHARED 0x01
++#define MAP_PRIVATE 0x02
++
++#define MAP_FAILED ((void*)-1)
++
++static __inline void* mmap(void* addr, size_t length, int prot, int flags, int fd, off_t offset) {
++    void* ptr;
++    (void)addr;
++    (void)prot;
++    (void)flags;
++
++    ptr = malloc(length);
++    if (!ptr) {
++        errno = ENOMEM;
++        return MAP_FAILED;
++    }
++
++    if (fd >= 0) {
++        off_t cur = lseek(fd, 0, SEEK_CUR);
++        if (lseek(fd, offset, SEEK_SET) == (off_t)-1) {
++            free(ptr);
++            return MAP_FAILED;
++        }
++        if (read(fd, ptr, (unsigned int)length) < 0) {
++            free(ptr);
++            return MAP_FAILED;
++        }
++        if (cur != (off_t)-1)
++            lseek(fd, cur, SEEK_SET);
++    }
++    return ptr;
++}
++
++static __inline int munmap(void* addr, size_t length) {
++    (void)length;
++    free(addr);
++    return 0;
++}
++
++#endif
++
++#endif
+diff --git a/include/sys/param.h b/include/sys/param.h
+new file mode 100644
+index 0000000..dcf4c9b
+--- /dev/null
++++ b/include/sys/param.h
+@@ -0,0 +1,42 @@
++#ifndef ASTROMETRY_WINDOWS_SYS_PARAM_H
++#define ASTROMETRY_WINDOWS_SYS_PARAM_H
++
++#if !defined(_WIN32)
++#include_next <sys/param.h>
++#else
++
++#ifndef MIN
++#define MIN(a, b) ((a) < (b) ? (a) : (b))
++#endif
++
++#ifndef MAX
++#define MAX(a, b) ((a) > (b) ? (a) : (b))
++#endif
++
++#ifndef LITTLE_ENDIAN
++#define LITTLE_ENDIAN 1234
++#endif
++
++#ifndef BIG_ENDIAN
++#define BIG_ENDIAN 4321
++#endif
++
++#ifndef PDP_ENDIAN
++#define PDP_ENDIAN 3412
++#endif
++
++#ifndef BYTE_ORDER
++#define BYTE_ORDER LITTLE_ENDIAN
++#endif
++
++#ifndef PATH_MAX
++#define PATH_MAX 260
++#endif
++
++#ifndef MAXPATHLEN
++#define MAXPATHLEN PATH_MAX
++#endif
++
++#endif
++
++#endif
+diff --git a/include/sys/resource.h b/include/sys/resource.h
+new file mode 100644
+index 0000000..16ed3e5
+--- /dev/null
++++ b/include/sys/resource.h
+@@ -0,0 +1,69 @@
++#ifndef ASTROMETRY_WINDOWS_SYS_RESOURCE_H
++#define ASTROMETRY_WINDOWS_SYS_RESOURCE_H
++
++#if !defined(_WIN32)
++#include_next <sys/resource.h>
++#else
++
++#include <stdint.h>
++#include <sys/time.h>
++#include <time.h>
++
++#define RUSAGE_SELF 0
++
++#define RLIMIT_NOFILE 7
++#define RLIMIT_DATA 2
++
++typedef uint64_t rlim_t;
++
++struct rlimit {
++    rlim_t rlim_cur;
++    rlim_t rlim_max;
++};
++
++struct rusage {
++    struct timeval ru_utime;
++    struct timeval ru_stime;
++    long ru_maxrss;
++};
++
++static __inline int getrusage(int who, struct rusage* usage) {
++    clock_t ticks;
++
++    if (!usage || who != RUSAGE_SELF)
++        return -1;
++
++    ticks = clock();
++    if (ticks == (clock_t)-1)
++        return -1;
++
++    usage->ru_maxrss = 0;
++    usage->ru_utime.tv_sec = (long)(ticks / CLOCKS_PER_SEC);
++    usage->ru_utime.tv_usec = (long)((ticks % CLOCKS_PER_SEC) * 1000000L / CLOCKS_PER_SEC);
++    usage->ru_stime.tv_sec = 0;
++    usage->ru_stime.tv_usec = 0;
++    return 0;
++}
++
++static __inline int getrlimit(int resource, struct rlimit* rlp) {
++    (void)resource;
++    if (!rlp)
++        return -1;
++    rlp->rlim_cur = (rlim_t)0x7fffffffffffffffULL;
++    rlp->rlim_max = (rlim_t)0x7fffffffffffffffULL;
++    return 0;
++}
++
++static __inline int setrlimit(int resource, const struct rlimit* rlp) {
++    (void)resource;
++    (void)rlp;
++    return 0;
++}
++
++static __inline int getpagesize(void) {
++    return 4096;
++}
++
++#endif
++
++#endif
+diff --git a/include/sys/select.h b/include/sys/select.h
+new file mode 100644
+index 0000000..1005a0b
+--- /dev/null
++++ b/include/sys/select.h
+@@ -0,0 +1,12 @@
++#ifndef ASTROMETRY_WINDOWS_SYS_SELECT_H
++#define ASTROMETRY_WINDOWS_SYS_SELECT_H
++
++#if !defined(_WIN32)
++#include_next <sys/select.h>
++#else
++
++#include <sys/time.h>
++
++#endif
++
++#endif
+diff --git a/include/sys/time.h b/include/sys/time.h
+new file mode 100644
+index 0000000..061df0b
+--- /dev/null
++++ b/include/sys/time.h
+@@ -0,0 +1,44 @@
++#ifndef ASTROMETRY_WINDOWS_SYS_TIME_H
++#define ASTROMETRY_WINDOWS_SYS_TIME_H
++
++#if !defined(_WIN32)
++#include_next <sys/time.h>
++#else
++
++#include <stdint.h>
++#include <time.h>
++#include <sys/timeb.h>
++
++#ifndef _TIMEVAL_DEFINED
++#define _TIMEVAL_DEFINED
++#ifndef _STRUCT_TIMEVAL
++#define _STRUCT_TIMEVAL
++#endif
++struct timeval {
++    long tv_sec;
++    long tv_usec;
++};
++#endif
++
++struct timezone {
++    int tz_minuteswest;
++    int tz_dsttime;
++};
++
++static __inline int gettimeofday(struct timeval* tv, struct timezone* tz) {
++    struct __timeb64 tb;
++
++    (void)tz;
++    if (!tv)
++        return -1;
++
++    if (_ftime64_s(&tb) != 0)
++        return -1;
++    tv->tv_sec = (long)tb.time;
++    tv->tv_usec = (long)tb.millitm * 1000L;
++    return 0;
++}
++
++#endif
++
++#endif
+diff --git a/include/sys/wait.h b/include/sys/wait.h
+new file mode 100644
+index 0000000..5a6f4b0
+--- /dev/null
++++ b/include/sys/wait.h
+@@ -0,0 +1,28 @@
++#ifndef ASTROMETRY_WINDOWS_SYS_WAIT_H
++#define ASTROMETRY_WINDOWS_SYS_WAIT_H
++
++#if !defined(_WIN32)
++#include_next <sys/wait.h>
++#else
++
++#include <errno.h>
++#include <process.h>
++
++typedef int pid_t;
++
++#define WIFSIGNALED(status) 0
++#define WTERMSIG(status) 0
++#define WIFEXITED(status) 1
++#define WEXITSTATUS(status) ((status) & 0xff)
++
++static __inline pid_t waitpid(pid_t pid, int* status, int options) {
++    (void)pid;
++    (void)status;
++    (void)options;
++    errno = ENOSYS;
++    return (pid_t)-1;
++}
++
++#endif
++
++#endif
+diff --git a/include/unistd.h b/include/unistd.h
+new file mode 100644
+index 0000000..91f686a
+--- /dev/null
++++ b/include/unistd.h
+@@ -0,0 +1,149 @@
++#ifndef ASTROMETRY_WINDOWS_UNISTD_H
++#define ASTROMETRY_WINDOWS_UNISTD_H
++
++#if !defined(_WIN32)
++#include_next <unistd.h>
++#else
++
++#include <direct.h>
++#include <fcntl.h>
++#include <io.h>
++#include <process.h>
++#include <stdint.h>
++#include <string.h>
++#include <sys/stat.h>
++#include <stdlib.h>
++#include <time.h>
++
++#ifndef STDIN_FILENO
++#define STDIN_FILENO 0
++#endif
++#ifndef STDOUT_FILENO
++#define STDOUT_FILENO 1
++#endif
++#ifndef STDERR_FILENO
++#define STDERR_FILENO 2
++#endif
++
++#ifndef F_OK
++#define F_OK 0
++#endif
++#ifndef R_OK
++#define R_OK 4
++#endif
++#ifndef W_OK
++#define W_OK 2
++#endif
++#ifndef X_OK
++#define X_OK 0
++#endif
++
++#ifndef S_IRUSR
++#define S_IRUSR _S_IREAD
++#endif
++#ifndef S_IWUSR
++#define S_IWUSR _S_IWRITE
++#endif
++#ifndef S_IRGRP
++#define S_IRGRP _S_IREAD
++#endif
++#ifndef S_IWGRP
++#define S_IWGRP _S_IWRITE
++#endif
++#ifndef S_IROTH
++#define S_IROTH _S_IREAD
++#endif
++#ifndef S_IWOTH
++#define S_IWOTH _S_IWRITE
++#endif
++
++#ifndef O_SYNC
++#define O_SYNC 0
++#endif
++
++#ifndef S_IFMT
++#define S_IFMT _S_IFMT
++#endif
++#ifndef S_IFREG
++#define S_IFREG _S_IFREG
++#endif
++#ifndef S_IFDIR
++#define S_IFDIR _S_IFDIR
++#endif
++#ifndef S_ISREG
++#define S_ISREG(mode) (((mode) & S_IFMT) == S_IFREG)
++#endif
++#ifndef S_ISDIR
++#define S_ISDIR(mode) (((mode) & S_IFMT) == S_IFDIR)
++#endif
++#ifndef S_ISLNK
++#define S_ISLNK(mode) 0
++#endif
++
++typedef intptr_t ssize_t;
++
++#define access _access
++#define chdir _chdir
++#define close _close
++#define dup _dup
++#define dup2 _dup2
++#define getcwd _getcwd
++#define getpid _getpid
++#define isatty _isatty
++#define lseek _lseek
++#define read _read
++#define unlink _unlink
++#define write _write
++#define fileno _fileno
++#ifndef mkdir
++#define mkdir(path, mode) _mkdir(path)
++#endif
++
++#ifndef fseeko
++#define fseeko _fseeki64
++#endif
++#ifndef ftello
++#define ftello _ftelli64
++#endif
++
++static __inline int mkstemp(char* tmpl) {
++    int fd;
++    if (!tmpl)
++        return -1;
++    if (_mktemp_s(tmpl, strlen(tmpl) + 1) != 0)
++        return -1;
++    fd = _open(tmpl, _O_CREAT | _O_EXCL | _O_RDWR | _O_BINARY, _S_IREAD | _S_IWRITE);
++    return fd;
++}
++
++static __inline char* mkdtemp(char* tmpl) {
++    if (!tmpl)
++        return NULL;
++    if (_mktemp_s(tmpl, strlen(tmpl) + 1) != 0)
++        return NULL;
++    if (_mkdir(tmpl) != 0)
++        return NULL;
++    return tmpl;
++}
++
++/* _sleep is deprecated on MSVC but still the compatible backend here. */
++#if defined(_MSC_VER)
++#pragma warning(push)
++#pragma warning(disable:4996)
++#endif
++static __inline int usleep(unsigned int usec) {
++    _sleep((usec + 999U) / 1000U);
++    return 0;
++}
++
++static __inline unsigned int sleep(unsigned int sec) {
++    _sleep(sec * 1000U);
++    return 0;
++}
++#if defined(_MSC_VER)
++#pragma warning(pop)
++#endif
++
++#endif
++
++#endif
+diff --git a/libkd/dualtree_rangesearch.c b/libkd/dualtree_rangesearch.c
+index 772cdf0..7b98820 100644
+--- a/libkd/dualtree_rangesearch.c
++++ b/libkd/dualtree_rangesearch.c
+@@ -3,12 +3,15 @@
+  # Licensed under a 3-clause BSD style license - see LICENSE
+  */
+ 
++#include <assert.h>
+ #include <string.h>
+ 
+ #include "dualtree_rangesearch.h"
+ #include "dualtree.h"
+ #include "mathutil.h"
+ 
++#define KDTREE_MAX_DIM 100
++
+ double RANGESEARCH_NO_LIMIT = 1.12345e308;
+ 
+ struct rs_params {
+@@ -149,6 +152,7 @@ static void rs_handle_result(void* vparams,
+     int x, y;
+     rs_params* p = (rs_params*)vparams;
+     int D = ytree->ndim;
++    assert(D <= KDTREE_MAX_DIM);
+ 
+     xl = kdtree_left (xtree, xnode);
+     xr = kdtree_right(xtree, xnode);
+@@ -156,7 +160,7 @@ static void rs_handle_result(void* vparams,
+     yr = kdtree_right(ytree, ynode);
+ 
+     for (y=yl; y<=yr; y++) {
+-        double py[D];
++        double py[KDTREE_MAX_DIM];
+         kdtree_copy_data_double(ytree, y, 1, py);
+         // check if we can eliminate the whole box for this point...
+         // HACK - can only do this if leaf nodes have bounding-boxes!
+@@ -172,7 +176,7 @@ static void rs_handle_result(void* vparams,
+         }
+         for (x=xl; x<=xr; x++) {
+             double d2;
+-            double px[D];
++            double px[KDTREE_MAX_DIM];
+             if (p->notself && x == y)
+                 continue;
+             kdtree_copy_data_double(xtree, x, 1, px);
+diff --git a/libkd/kdtree_internal.c b/libkd/kdtree_internal.c
+index 0f81e4b..5c3353f 100644
+--- a/libkd/kdtree_internal.c
++++ b/libkd/kdtree_internal.c
+@@ -19,7 +19,7 @@
+ #define KDTREE_MAX_RESULTS 1000
+ #define KDTREE_MAX_DIM 100
+ 
+-#define WARNING(x, ...) fprintf(stderr, x, ## __VA_ARGS__)
++#define WARNING(...) fprintf(stderr, __VA_ARGS__)
+ 
+ #define MANGLE(x) KDMANGLE(x, ETYPE, DTYPE, TTYPE)
+ 
+@@ -581,7 +581,7 @@ static void kdtree_nn_bb(const kdtree_t* kd, const etype* query,
+     anbool use_tquery = FALSE;
+     anbool use_tmath = FALSE;
+     anbool use_bigtmath = FALSE;
+-    ttype tquery[D];
++    ttype tquery[KDTREE_MAX_DIM];
+     double bestd2 = *p_bestd2;
+     int ibest = *p_ibest;
+     ttype tl2 = 0;
+@@ -593,6 +593,7 @@ static void kdtree_nn_bb(const kdtree_t* kd, const etype* query,
+ #else
+     D = kd->ndim;
+ #endif
++    assert(D <= KDTREE_MAX_DIM);
+ 
+     if (TTYPE_INTEGER) {
+         use_tquery = ttype_query(kd, query, tquery);
+@@ -911,10 +912,11 @@ void MANGLE(kdtree_nn)(const kdtree_t* kd, const void* vquery,
+ #else
+     D = kd->ndim;
+ #endif
++    assert(D <= KDTREE_MAX_DIM);
+ 
+     // Integers.
+     if (TTYPE_INTEGER) {
+-        ttype tquery[D];
++        ttype tquery[KDTREE_MAX_DIM];
+         if (ttype_query(kd, query, tquery)) {
+             kdtree_nn_int_split(kd, query, tquery, p_bestd2, p_ibest);
+             return;
+@@ -1058,7 +1060,7 @@ kdtree_qres_t* MANGLE(kdtree_rangesearch_options)
+     const etype* query = vquery;
+ 
+     //dtype dquery[D];
+-    ttype tquery[D];
++    ttype tquery[KDTREE_MAX_DIM];
+ 
+     if (!kd || !query)
+         return NULL;
+@@ -1068,6 +1070,7 @@ kdtree_qres_t* MANGLE(kdtree_rangesearch_options)
+ #else
+     D = kd->ndim;
+ #endif
++    assert(D <= KDTREE_MAX_DIM);
+ 	
+     if (options & KD_OPTIONS_SORT_DISTS)
+         // gotta compute 'em if ya wanna sort 'em!
+@@ -1285,7 +1288,7 @@ kdtree_qres_t* MANGLE(kdtree_rangesearch_options)
+                 wholenode = do_wholenode_check &&
+                     !bb_point_maxdist2_exceeds_bigttype(tlo, thi, tquery, D, bigtl2);
+             } else {
+-                etype bblo[D], bbhi[D];
++                etype bblo[KDTREE_MAX_DIM], bbhi[KDTREE_MAX_DIM];
+                 int d;
+                 for (d=0; d<D; d++) {
+                     bblo[d] = POINT_TE(kd, d, tlo[d]);
+@@ -1551,6 +1554,7 @@ static void kdtree_quickselect_partition(dtype *arr, unsigned int *parr,
+     // tell the compiler this is a constant...
+     D = KD_DIM;
+ #endif
++    assert(D <= KDTREE_MAX_DIM);
+ 
+     /* sanity is good */
+     assert(R >= L);
+@@ -1569,7 +1573,7 @@ static void kdtree_quickselect_partition(dtype *arr, unsigned int *parr,
+         int middle;
+         int nless, nequal;
+         // temp storage for ELEM_SWAP and ELEM_ROT macros.
+-        dtype tmpdata[D];
++        dtype tmpdata[KDTREE_MAX_DIM];
+         int tmpperm;
+ 
+         if (high == low)
+@@ -2130,10 +2134,10 @@ kdtree_t* MANGLE(kdtree_build_2)
+     int xx;
+     int lnext, level;
+     int maxlevel;
+-    dtype hi[D], lo[D];
++    dtype hi[KDTREE_MAX_DIM], lo[KDTREE_MAX_DIM];
+     dtype* data = NULL;
+ 
+-    dtype nullbb[D];
++    dtype nullbb[KDTREE_MAX_DIM];
+     for (i=0; i<D; i++)
+         nullbb[i] = 0;
+ 
+@@ -2509,11 +2513,12 @@ void MANGLE(kdtree_fix_bounding_boxes)(kdtree_t* kd) {
+     // bounding boxes up the levels of the tree...
+     int i;
+     int D = kd->ndim;
++    assert(D <= KDTREE_MAX_DIM);
+     kd->bb.any = MALLOC((size_t)kd->nnodes * sizeof(ttype) * (size_t)(D * 2));
+     assert(kd->bb.any);
+     for (i=0; i<kd->nnodes; i++) {
+         unsigned int left, right;
+-        dtype hi[D], lo[D];
++        dtype hi[KDTREE_MAX_DIM], lo[KDTREE_MAX_DIM];
+         left = kdtree_left(kd, i);
+         right = kdtree_right(kd, i);
+         compute_bb(KD_DATA(kd, D, left), D, right - left + 1, lo, hi);
+@@ -2860,9 +2865,10 @@ void MANGLE(kdtree_nodes_contained)
+       void* cb_extra) {
+     int D = kd->ndim;
+     int d;
+-    ttype qlo[D], qhi[D];
++    ttype qlo[KDTREE_MAX_DIM], qhi[KDTREE_MAX_DIM];
+     const etype* querylow = vquerylow;
+     const etype* queryhi = vqueryhi;
++    assert(D <= KDTREE_MAX_DIM);
+ 
+     for (d=0; d<D; d++) {
+         double q;
+@@ -2916,4 +2922,3 @@ void MANGLE(kdtree_update_funcs)(kdtree_t* kd) {
+     kd->fun.rangesearch = MANGLE(kdtree_rangesearch_options);
+     kd->fun.nodes_contained = MANGLE(kdtree_nodes_contained);
+ }
+-
+diff --git a/libkd/kdtree_internal_fits.c b/libkd/kdtree_internal_fits.c
+index a954c2a..d163117 100644
+--- a/libkd/kdtree_internal_fits.c
++++ b/libkd/kdtree_internal_fits.c
+@@ -12,6 +12,7 @@
+ #include "errors.h"
+ 
+ #define KDTREE_FITS_VERSION 1
++#define KDTREE_MAX_DIM 100
+ 
+ static char* get_table_name(const char* treename, const char* tabname) {
+     char* rtn;
+@@ -312,8 +313,9 @@ int MANGLE(kdtree_write_fits)(kdtree_fits_t* io, const kdtree_t* kd,
+         fitsbin_chunk_reset(&chunk);
+     }
+     if (kd->minval && kd->maxval) {
+-        double tempranges[kd->ndim * 2 + 1];
++        double tempranges[KDTREE_MAX_DIM * 2 + 1];
+         int d;
++        assert(kd->ndim <= KDTREE_MAX_DIM);
+         memcpy(tempranges, kd->minval, kd->ndim * sizeof(double));
+         memcpy(tempranges + kd->ndim, kd->maxval, kd->ndim * sizeof(double));
+         tempranges[kd->ndim*2] = kd->scale;
+diff --git a/qfits-an/anqfits.c b/qfits-an/anqfits.c
+index 1cd77f6..314ef04 100644
+--- a/qfits-an/anqfits.c
++++ b/qfits-an/anqfits.c
+@@ -38,7 +38,7 @@
+ #define debug printf
+ #else
+ #define qdebug( code ) {}
+-#define debug(args...)
++#define debug(...) ((void)0)
+ #endif
+ 
+ int fits_get_atom_size(tfits_type type) {
+@@ -1288,4 +1288,3 @@ void* anqfits_readpix(const anqfits_t* qf, int ext,
+ 
+ 
+ 
+-
+diff --git a/qfits-an/qfits_memory.c b/qfits-an/qfits_memory.c
+index 8c1bfe4..734afec 100644
+--- a/qfits-an/qfits_memory.c
++++ b/qfits-an/qfits_memory.c
+@@ -314,13 +314,15 @@ void * qfits_memory_malloc(
+         /* Create swap file with rights: rw-rw-rw- */
+         swapfileid = ++ qfits_memory_table.file_reg;
+         fname = qfits_memory_tmpfilename(swapfileid);
+-        mode_t mod = S_IRUSR|S_IWUSR|S_IRGRP|S_IWGRP|S_IROTH|S_IWOTH;
++        int mod = S_IRUSR|S_IWUSR|S_IRGRP|S_IWGRP|S_IROTH|S_IWOTH;
+         swapfd = open(fname, O_RDWR | O_CREAT, mod);
+         if (swapfd==-1) {
+             fprintf(stderr, "qfits_mem: cannot create swap file\n");
+             exit(-1);
+         }
++#if !defined(_WIN32)
+         fchmod(swapfd, mod);
++#endif
+ 
+         /* Compute number of passes to insert buffer */
+         nbufs = size / MEMPAGESZ;
+diff --git a/qfits-an/qfits_time.c b/qfits-an/qfits_time.c
+index 70fbf92..356d7c0 100644
+--- a/qfits-an/qfits_time.c
++++ b/qfits-an/qfits_time.c
+@@ -38,6 +38,9 @@
+ #include <sys/time.h>
+ 
+ #include "qfits_time.h"
++#ifdef _WIN32
++#include "os-features.h"
++#endif
+ 
+ /*-----------------------------------------------------------------------------
+                                    Macros
+diff --git a/solver/control-program.c b/solver/control-program.c
+index 1bb68ad..d5dd4cb 100644
+--- a/solver/control-program.c
++++ b/solver/control-program.c
+@@ -110,6 +110,10 @@ static anbool record_match_callback(MatchObj* mo, void* userdata) {
+     int i;
+     // copy "mo" to "mymatch"
+     memcpy(mymatch, mo, sizeof(MatchObj));
++    if (mo->sip != NULL) {
++        mymatch.sip = malloc(sizeof(sip_t));
++        memcpy(mymatch.sip, mo->sip, sizeof(sip_t));
++    }
+     // steal these arrays from "mo": we memcpy'd the pointers above, now NULL
+     // them out in "mo" to prevent them from being free'd.
+     mo->theta = NULL;
+@@ -477,6 +481,7 @@ int main(int argc, char** args) {
+         }
+ 
+     skip:
++        free(cb.match.sip);
+         solver_cleanup_field(solver);
+         solver_clear_indexes(solver);
+ 
+diff --git a/solver/solver.c b/solver/solver.c
+index a120db5..078471b 100644
+--- a/solver/solver.c
++++ b/solver/solver.c
+@@ -180,6 +180,10 @@ void solver_tweak2(solver_t* sp, MatchObj* mo, int order, sip_t* verifysip) {
+ 
+     logverb("solver_tweak2: set_crpix %i, crpix (%.1f,%.1f)\n",
+             sp->set_crpix, sp->crpix[0], sp->crpix[1]);
++    if (mo->sip != NULL) {
++        free(mo->sip);
++        mo->sip = NULL;
++    }
+     mo->sip = tweak2(xy, Nxy,
+                      sp->verify_pix, // pixel positional noise sigma
+                      solver_field_width(sp),
+@@ -352,10 +356,15 @@ static void update_timeused(solver_t* sp) {
+ }
+ 
+ static void set_matchobj_template(solver_t* solver, MatchObj* mo) {
+-    if (solver->mo_template)
++    if (solver->mo_template) {
+         memcpy(mo, solver->mo_template, sizeof(MatchObj));
+-    else
++        if (solver->mo_template->sip != NULL) {
++            mo->sip = malloc(sizeof(sip_t));
++            memcpy(mo->sip, solver->mo_template->sip, sizeof(sip_t));
++        }
++    } else {
+         memset(mo, 0, sizeof(MatchObj));
++    }
+ }
+ 
+ static void get_field_center(solver_t* s, double* cx, double* cy) {
+@@ -771,6 +780,8 @@ void solver_run(solver_t* solver) {
+     time_t next_timer_callback_time = time(NULL) + 1;
+     pquad* pquads;
+     size_t i, num_indexes;
++    double* minAB2s = NULL;
++    double* maxAB2s = NULL;
+     double tol2;
+     int field[DQMAX];
+ 
+@@ -795,10 +806,18 @@ void solver_run(solver_t* solver) {
+ 
+     num_indexes = pl_size(solver->indexes);
+     {
+-        double minAB2s[num_indexes];
+-        double maxAB2s[num_indexes];
+         solver->minminAB2 = LARGE_VAL;
+         solver->maxmaxAB2 = -LARGE_VAL;
++        if (num_indexes) {
++            minAB2s = calloc(num_indexes, sizeof(double));
++            maxAB2s = calloc(num_indexes, sizeof(double));
++            if (!minAB2s || !maxAB2s) {
++                ERROR("Failed to allocate index scale bounds arrays");
++                free(minAB2s);
++                free(maxAB2s);
++                return;
++            }
++        }
+         for (i = 0; i < num_indexes; i++) {
+             double minAB=0, maxAB=0;
+             index_t* index = pl_get(solver->indexes, i);
+@@ -1034,6 +1053,8 @@ void solver_run(solver_t* solver) {
+         }
+ 
+     quitnow:
++        free(minAB2s);
++        free(maxAB2s);
+         for (i = 0; i < (numxy*numxy); i++) {
+             pquad* pq = pquads + i;
+             free(pq->inbox);
+@@ -1280,12 +1301,16 @@ static void resolve_matches(kdtree_qres_t* krez, const double *field_xy,
+     //    [x_A,y_A, x_B,y_B, x_C,y_C, ...]
+     int jj, thisquadno;
+     MatchObj mo;
+-    unsigned int star[dimquads];
++    unsigned int star[DQMAX];
+ 
+     assert(krez);
++    if (dimquads > DQMAX) {
++        ERROR("resolve_matches: dimquads %i exceeds DQMAX %i", dimquads, DQMAX);
++        return;
++    }
+ 
+     for (jj = 0; jj < krez->nres; jj++) {
+-        double starxyz[dimquads*3];
++        double starxyz[DQMAX*3];
+         double scale;
+         double arcsecperpix;
+         tan_t wcs;
+@@ -1366,11 +1391,16 @@ static void resolve_matches(kdtree_qres_t* krez, const double *field_xy,
+ 
+         set_center_and_radius(solver, &mo, &(mo.wcstan), NULL);
+ 
+-        if (solver_handle_hit(solver, &mo, NULL, FALSE))
++        if (solver_handle_hit(solver, &mo, NULL, FALSE)) {
+             solver->quit_now = TRUE;
++        }
+ 
+-        if (unlikely(solver->quit_now))
++        sip_free(mo.sip);
++        mo.sip = NULL;
++
++        if (unlikely(solver->quit_now)) {
+             return;
++        }
+     }
+ }
+ 
+@@ -1420,6 +1450,7 @@ static int solver_handle_hit(solver_t* sp, MatchObj* mo, sip_t* verifysip,
+         // Since we tuned up this solution, we can't just accept the
+         // resulting log-odds at face value.
+         if (!fake_match) {
++            verify_free_matchobj(mo);
+             verify_hit(sp->index->starkd, sp->index->cutnside,
+                        mo, mo->sip, sp->vf, match_distance_in_pixels2,
+                        sp->distractor_ratio,
+@@ -1434,8 +1465,10 @@ static int solver_handle_hit(solver_t* sp, MatchObj* mo, sip_t* verifysip,
+         }
+     }
+ 
+-    if (mo->logodds < sp->logratio_toprint)
++    if (mo->logodds < sp->logratio_toprint) {
++        verify_free_matchobj(mo);
+         return FALSE;
++    }
+ 
+     // Also copy original field star coordinates
+     //mo.quadpix_orig
+@@ -1455,8 +1488,10 @@ static int solver_handle_hit(solver_t* sp, MatchObj* mo, sip_t* verifysip,
+ 
+     matchobj_print(mo, log_get_level());
+ 
+-    if (mo->logodds < sp->logratio_tokeep)
++    if (mo->logodds < sp->logratio_tokeep) {
++        verify_free_matchobj(mo);
+         return FALSE;
++    }
+ 
+     logverb("Pixel scale: %g arcsec/pix.\n", mo->scale);
+     logverb("Parity: %s.\n", (mo->parity ? "neg" : "pos"));
+@@ -1649,9 +1684,19 @@ static int solver_handle_hit(solver_t* sp, MatchObj* mo, sip_t* verifysip,
+ 
+     // New best match?
+     if (!sp->have_best_match || (mo->logodds > sp->best_match.logodds)) {
+-        if (sp->have_best_match)
++        if (sp->have_best_match) {
++            // free the previous best match (including its sip, if any)
+             verify_free_matchobj(&sp->best_match);
++            if (sp->best_match.sip != NULL) {
++                free(sp->best_match.sip);
++                sp->best_match.sip = NULL;
++            }
++        }
+         memcpy(&sp->best_match, mo, sizeof(MatchObj));
++        if (mo->sip != NULL) {
++            sp->best_match.sip = malloc(sizeof(sip_t));
++            memcpy(sp->best_match.sip, mo->sip, sizeof(sip_t));
++        }
+         sp->have_best_match = TRUE;
+         sp->best_index = sp->index;
+     } else {
+diff --git a/solver/tweak2.c b/solver/tweak2.c
+index ee3150c..d546cca 100644
+--- a/solver/tweak2.c
++++ b/solver/tweak2.c
+@@ -277,8 +277,11 @@ sip_t* tweak2(const double* fieldxy, int Nfield,
+             // clean up from last round (we do it here so that they're
+             // valid when we leave the loop)
+             free(theta);
++            theta = NULL;
+             free(odds);
++            odds = NULL;
+             free(refperm);
++            refperm = NULL;
+ 
+             // Anneal
+             gamma = pow(0.9, step);
+@@ -312,11 +315,17 @@ sip_t* tweak2(const double* fieldxy, int Nfield,
+ 
+             if (Nin == 0) {
+                 sip_free(sipout);
++                sipout = NULL;
+                 free(matchxy);
++                matchxy = NULL;
+                 free(matchxyz);
++                matchxyz = NULL;
+                 free(weights);
++                weights = NULL;
+                 free(fieldsigma2s);
++                fieldsigma2s = NULL;
+                 free(indexpix);
++                indexpix = NULL;
+                 free(indexin);
+                 return NULL;
+             }
+@@ -362,7 +371,27 @@ sip_t* tweak2(const double* fieldxy, int Nfield,
+                                             W, H, distractors,
+                                             logodds_bail, LARGE_VAL,
+                                             &besti, &odds, &theta, NULL,
+-                                            &testperm, &refperm);
++                                            NULL, &refperm);
++
++            if (theta == NULL) {
++                free(refperm);
++                refperm = NULL;
++                sip_free(sipout);
++                sipout = NULL;
++                free(matchxy);
++                matchxy = NULL;
++                free(matchxyz);
++                matchxyz = NULL;
++                free(weights);
++                weights = NULL;
++                free(fieldsigma2s);
++                fieldsigma2s = NULL;
++                free(indexpix);
++                indexpix = NULL;
++                free(indexin);
++                indexin = NULL;
++                return NULL;
++            }
+ 
+             logverb("Logodds: %g\n", logodds);
+             verify_count_hits(theta, besti, &nmatch, &nconf, &ndist);
+@@ -427,13 +456,25 @@ sip_t* tweak2(const double* fieldxy, int Nfield,
+             if (Nmatch < 2) {
+                 logverb("No matches -- aborting tweak attempt\n");
+                 free(theta);
++                theta = NULL;
++                free(odds);
++                odds = NULL;
++                free(refperm);
++                refperm = NULL;
+                 sip_free(sipout);
++                sipout = NULL;
+                 free(matchxy);
++                matchxy = NULL;
+                 free(matchxyz);
++                matchxyz = NULL;
+                 free(weights);
++                weights = NULL;
+                 free(fieldsigma2s);
++                fieldsigma2s = NULL;
+                 free(indexpix);
++                indexpix = NULL;
+                 free(indexin);
++                indexin = NULL;
+                 return NULL;
+             }
+ 
+@@ -490,8 +531,11 @@ sip_t* tweak2(const double* fieldxy, int Nfield,
+         double pix2;
+ 
+         free(theta);
++        theta = NULL;
+         free(odds);
++        odds = NULL;
+         free(refperm);
++        refperm = NULL;
+         gamma = 1.0;
+         // Project reference sources into pixel space; keep the ones inside image bounds.
+         Nin = 0;
+@@ -526,7 +570,7 @@ sip_t* tweak2(const double* fieldxy, int Nfield,
+                                         W, H, distractors,
+                                         logodds_bail, LARGE_VAL,
+                                         &besti, &odds, &theta, NULL,
+-                                        &testperm, &refperm);
++                                        NULL, &refperm);
+         logverb("Logodds: %g\n", logodds);
+         verify_count_hits(theta, besti, &nmatch, &nconf, &ndist);
+         logverb("%i matches, %i distractors, %i conflicts (at best log-odds); %i field sources, %i index sources\n", nmatch, ndist, nconf, Nfield, Nin);
+@@ -558,12 +602,16 @@ sip_t* tweak2(const double* fieldxy, int Nfield,
+         }
+     }
+     free(theta);
++    theta = NULL;
+     free(refperm);
++    refperm = NULL;
+ 
+-    if (newodds)
++    if (newodds) {
+         *newodds = odds;
+-    else
++    } else {
+         free(odds);
++        odds = NULL;
++    }
+ 
+     logverb("Tweak2: final WCS:\n");
+     if (log_get_level() >= LOG_VERB)
+@@ -575,12 +623,17 @@ sip_t* tweak2(const double* fieldxy, int Nfield,
+         *p_besti = besti;
+ 
+     free(indexin);
++    indexin = NULL;
+     free(indexpix);
++    indexpix = NULL;
+     free(fieldsigma2s);
++    fieldsigma2s = NULL;
+     free(weights);
++    weights = NULL;
+     free(matchxyz);
++    matchxyz = NULL;
+     free(matchxy);
++    matchxy = NULL;
+ 
+     return sipout;
+ }
+-
+diff --git a/solver/verify.c b/solver/verify.c
+index ebced60..8f15afa 100644
+--- a/solver/verify.c
++++ b/solver/verify.c
+@@ -21,9 +21,9 @@
+ #define DEBUGVERIFY 0
+ 
+ #if DEBUGVERIFY
+-#define debug2(args...) logdebug(args)
++#define debug2(...) logdebug(__VA_ARGS__)
+ #else
+-#define debug2(args...)
++#define debug2(...) ((void)0)
+ #endif
+ 
+ #define DATALOG_MASK_VERIFY 0x1
+@@ -33,7 +33,7 @@
+ 
+ #define DLOG_ODDS_MIN log(1e6)
+ 
+-#define dlog(lev, fmt, ...) data_log(DATALOG_MASK_VERIFY, lev, fmt, ##__VA_ARGS__)
++#define dlog(lev, ...) data_log(DATALOG_MASK_VERIFY, lev, __VA_ARGS__)
+ 
+ struct verify_s {
+     const sip_t* wcs;
+@@ -1764,4 +1764,3 @@ double verify_star_lists_ror(double* refxys, int NR,
+ 	
+     return X;
+ }
+-
+diff --git a/solver/verify2.c b/solver/verify2.c
+index 4395f25..04dc0b4 100644
+--- a/solver/verify2.c
++++ b/solver/verify2.c
+@@ -8,6 +8,7 @@
+ #include <string.h>
+ #include <stdint.h>
+ 
++#include "os-features.h"
+ #include "verify2.h"
+ #include "permutedsort.h"
+ #include "mathutil.h"
+@@ -18,9 +19,9 @@
+ 
+ #define DEBUGVERIFY 1
+ #if DEBUGVERIFY
+-//#define debug(args...) fprintf(stderr, args)
++//#define debug(...) fprintf(stderr, __VA_ARGS__)
+ #else
+-#define debug(args...)
++#define debug(...) ((void)0)
+ #endif
+ 
+ #include "fitsioutils.h"
+@@ -397,5 +398,3 @@ void verify_get_all_matches(const double* refxys, int NR,
+ 
+ 
+ 
+-
+-
+diff --git a/solver/whynot.c b/solver/whynot.c
+index 2b6323b..2606184 100644
+--- a/solver/whynot.c
++++ b/solver/whynot.c
+@@ -977,6 +977,10 @@ int main(int argc, char** args) {
+             fq.pscale = tan_pixel_scale(&wcs);
+             fq.quadnum = quad;
+             memcpy(&(fq.mo), &mo, sizeof(MatchObj));
++            if (mo->sip != NULL) {
++                fq.mo.sip = malloc(sizeof(sip_t));
++                memcpy(fq.mo.sip, mo->sip, sizeof(sip_t));
++            }
+             bl_append(foundquads, &fq);
+         }
+ 
+diff --git a/util/an-endian.c b/util/an-endian.c
+index 67cb6aa..5c02532 100644
+--- a/util/an-endian.c
++++ b/util/an-endian.c
+@@ -3,6 +3,12 @@
+  # Licensed under a 3-clause BSD style license - see LICENSE
+  */
+ 
++#ifdef _MSC_VER
++/* MSVC: bare 'inline' does not emit external symbols; strip it so that
++ * these functions are compiled as regular extern functions. */
++#define inline
++#endif
++
+ #include "an-endian.h"
+ 
+ /*
+diff --git a/util/bl.c b/util/bl.c
+index 5e009ca..4e94dc6 100644
+--- a/util/bl.c
++++ b/util/bl.c
+@@ -9,6 +9,7 @@
+ #include <stdarg.h>
+ #include <assert.h>
+ 
++#include "os-features.h"
+ #include "bl.h"
+ 
+ #include "keywords.h"
+@@ -1257,4 +1258,3 @@ char* sl_insert_sorted(sl* list, const char* string) {
+ #define InlineDefine InlineDefineC
+ #include "bl.inc"
+ #undef InlineDefine
+-
+diff --git a/util/cfitsutils.h b/util/cfitsutils.h
+index 63f14ad..903e852 100644
+--- a/util/cfitsutils.h
++++ b/util/cfitsutils.h
+@@ -27,11 +27,11 @@ static void cfitserr(int status) {
+     sl_free2(msgs);
+ }
+ 
+-#define CFITS_CHECK(msg, ...) \
++#define CFITS_CHECK(...) \
+ do { \
+ if (status) { \
+ cfitserr(status); \
+-ERROR(msg, ##__VA_ARGS__); \
++ERROR(__VA_ARGS__); \
+ goto bailout; \
+ } \
+ } while(0)
+diff --git a/util/errors.c b/util/errors.c
+index 703a707..4b12480 100644
+--- a/util/errors.c
++++ b/util/errors.c
+@@ -8,6 +8,7 @@
+ #include <errno.h>
+ #include <stdio.h>
+ 
++#include "os-features.h"
+ #include "errors.h"
+ #include "ioutils.h"
+ #include "an-bool.h"
+@@ -264,4 +265,3 @@ void error_stack_clear(err_t* e) {
+     }
+     bl_remove_all(e->errstack);
+ }
+-
+diff --git a/util/fitsbin.c b/util/fitsbin.c
+index e18e0ca..da069df 100644
+--- a/util/fitsbin.c
++++ b/util/fitsbin.c
+@@ -5,11 +5,13 @@
+ 
+ #include <stdarg.h>
+ #include <stdio.h>
++#include <stdlib.h>
+ #include <sys/types.h>
+ #include <sys/mman.h>
+ #include <string.h>
+ #include <assert.h>
+ 
++#include "os-features.h"
+ #include "keywords.h"
+ #include "fitsbin.h"
+ #include "fitsioutils.h"
+@@ -263,18 +265,26 @@ static int write_chunk(fitsbin_t* fb, fitsbin_chunk_t* chunk, int flipped) {
+ 
+         int i, j;
+         int nper = chunk->itemsize / flipped;
+-        char tempdata[chunk->itemsize];
++        char* tempdata;
+         assert(chunk->itemsize >= flipped);
+         assert(nper * flipped == chunk->itemsize);
++        tempdata = malloc((size_t)chunk->itemsize);
++        if (!tempdata) {
++            ERROR("Failed to allocate %i-byte temporary FITS chunk buffer", chunk->itemsize);
++            return -1;
++        }
+         for (i=0; i<N; i++) {
+             // copy it...
+-            memcpy(tempdata, chunk->data + i*chunk->itemsize, chunk->itemsize);
++            memcpy(tempdata,
++                   ((const char*)chunk->data) + ((size_t)i * (size_t)chunk->itemsize),
++                   (size_t)chunk->itemsize);
+             // swap it...
+             for (j=0; j<nper; j++)
+                 endian_swap(tempdata + j*flipped, flipped);
+             // write it...
+             fitsbin_write_item(fb, chunk, tempdata);
+         }
++        free(tempdata);
+     }
+     chunk->nrows -= N;
+     if (fitsbin_fix_chunk_header(fb, chunk)) {
+@@ -619,4 +629,3 @@ fitsbin_t* fitsbin_open_for_writing(const char* fn) {
+     }
+     return fb;
+ }
+-
+diff --git a/util/fitsioutils.c b/util/fitsioutils.c
+index 8b9c3ab..ecf067e 100644
+--- a/util/fitsioutils.c
++++ b/util/fitsioutils.c
+@@ -82,7 +82,8 @@ qfits_table* fits_copy_table(qfits_table* tbl) {
+ 
+ int fits_pixdump(const qfitsdumper * qd) {
+     FILE* f_out;
+-    const void* vbuf;
++    const void* srcbuf;
++    const unsigned char* vbuf;
+     anbool tostdout;
+     int i;
+     int isize;
+@@ -96,16 +97,16 @@ int fits_pixdump(const qfitsdumper * qd) {
+     }
+ 
+     // accept
+-    vbuf = qd->vbuf;
++    srcbuf = qd->vbuf;
+     switch (qd->ptype) {
+     case PTYPE_FLOAT:
+-        if (!vbuf) vbuf = qd->fbuf;
++        if (!srcbuf) srcbuf = qd->fbuf;
+         break;
+     case PTYPE_INT:
+-        if (!vbuf) vbuf = qd->ibuf;
++        if (!srcbuf) srcbuf = qd->ibuf;
+         break;
+     case PTYPE_DOUBLE:
+-        if (!vbuf) vbuf = qd->dbuf;
++        if (!srcbuf) srcbuf = qd->dbuf;
+         break;
+     case PTYPE_UINT8:
+     case PTYPE_INT16:
+@@ -116,10 +117,11 @@ int fits_pixdump(const qfitsdumper * qd) {
+         return -1;
+     }
+ 
+-    if (!vbuf) {
++    if (!srcbuf) {
+         ERROR("No pixel buffer supplied");
+         return -1;
+     }
++    vbuf = (const unsigned char*)srcbuf;
+ 
+     tostdout = streq(qd->filename, "STDOUT");
+     if (tostdout)
+@@ -145,7 +147,7 @@ int fits_pixdump(const qfitsdumper * qd) {
+             SYSERROR("Failed to write FITS pixel value to file \"%s\"", qd->filename);
+             return -1;
+         }
+-        vbuf += isize;
++        vbuf += (size_t)isize;
+     }
+ 
+     if (!tostdout)
+@@ -1054,7 +1056,9 @@ static void fits_init_endian_string() {
+         uint32_t endian = ENDIAN_DETECTOR;
+         unsigned char* cptr = (unsigned char*)&endian;
+         fits_endian_string_inited = 1;
+-        sprintf(fits_endian_string, "%02x:%02x:%02x:%02x", (uint)cptr[0], (uint)cptr[1], (uint)cptr[2], (uint)cptr[3]);
++        sprintf(fits_endian_string, "%02x:%02x:%02x:%02x",
++                (unsigned int)cptr[0], (unsigned int)cptr[1],
++                (unsigned int)cptr[2], (unsigned int)cptr[3]);
+     }
+ }
+ 
+@@ -1174,7 +1178,7 @@ int fits_find_column(const qfits_table* table, const char* colname) {
+ }
+ 
+ void fits_add_uint_size(qfits_header* header) {
+-    fits_header_add_int(header, "UINT_SZ", sizeof(uint), "sizeof(uint)");
++    fits_header_add_int(header, "UINT_SZ", sizeof(unsigned int), "sizeof(unsigned int)");
+ }
+ 
+ void fits_add_double_size(qfits_header* header) {
+@@ -1184,9 +1188,9 @@ void fits_add_double_size(qfits_header* header) {
+ int fits_check_uint_size(const qfits_header* header) {
+     int uintsz;
+     uintsz = qfits_header_getint(header, "UINT_SZ", -1);
+-    if (sizeof(uint) != uintsz) {
+-        fprintf(stderr, "File was written with sizeof(uint)=%i, but currently sizeof(uint)=%u.\n",
+-                uintsz, (uint)sizeof(uint));
++    if (sizeof(unsigned int) != (size_t)uintsz) {
++        fprintf(stderr, "File was written with sizeof(unsigned int)=%i, but currently sizeof(unsigned int)=%u.\n",
++                uintsz, (unsigned int)sizeof(unsigned int));
+         return -1;
+     }
+     return 0;
+@@ -1195,9 +1199,9 @@ int fits_check_uint_size(const qfits_header* header) {
+ int fits_check_double_size(const qfits_header* header) {
+     int doublesz;
+     doublesz = qfits_header_getint(header, "DUBL_SZ", -1);
+-    if (sizeof(double) != doublesz) {
++    if (sizeof(double) != (size_t)doublesz) {
+         fprintf(stderr, "File was written with sizeof(double)=%i, but currently sizeof(double)=%u.\n",
+-                doublesz, (uint)sizeof(double));
++                doublesz, (unsigned int)sizeof(double));
+         return -1;
+     }
+     return 0;
+diff --git a/util/fitstable.c b/util/fitstable.c
+index e7cb3c3..67e044a 100644
+--- a/util/fitstable.c
++++ b/util/fitstable.c
+@@ -698,7 +698,7 @@ static int write_one(fitstable_t* table, const void* struc, anbool flip,
+         col = getcol(table, i);
+         if (col->in_struct) {
+             if (struc)
+-                columndata = struc + col->coffset;
++                columndata = ((const char*)struc) + col->coffset;
+             else
+                 columndata = NULL;
+         } else {
+@@ -1656,4 +1656,3 @@ int fitstable_pushback(fitstable_t* tab) {
+     buffered_read_pushback(tab->br);
+     return 0;
+ }
+-
+diff --git a/util/ioutils.c b/util/ioutils.c
+index 3a9bd48..6f51442 100644
+--- a/util/ioutils.c
++++ b/util/ioutils.c
+@@ -391,6 +391,37 @@ static int readfd(int fd, char* buf, int NB, char** pcursor,
+ }
+ 
+ int run_command_get_outputs(const char* cmd, sl** outlines, sl** errlines) {
++#if defined(_WIN32)
++    FILE* pipe;
++    char line[1024];
++    int status;
++
++    if (outlines)
++        *outlines = sl_new(256);
++    if (errlines)
++        *errlines = sl_new(16);
++
++    pipe = _popen(cmd, "r");
++    if (!pipe) {
++        SYSERROR("Failed to run command: %s", cmd);
++        return -1;
++    }
++
++        while (fgets(line, sizeof(line), pipe)) {
++            size_t n = strlen(line);
++            while (n && (line[n-1] == '\n' || line[n-1] == '\r'))
++                line[--n] = '\0';
++            if (outlines)
++                sl_append(*outlines, line);
++        }
++
++    status = _pclose(pipe);
++    if (status != 0) {
++        ERROR("Command failed: return value %i", status);
++        return status;
++    }
++    return 0;
++#else
+     int outpipe[2];
+     int errpipe[2];
+     pid_t pid;
+@@ -581,6 +612,7 @@ int run_command_get_outputs(const char* cmd, sl** outlines, sl** errlines) {
+     }
+     
+     return 0;
++#endif
+ }
+ 
+ int mkdir_p(const char* dirpath) {
+@@ -883,6 +915,7 @@ char* strdup_safe(const char* str) {
+ }
+ 
+ static int oldsigbus_valid = 0;
++#if !defined(_WIN32)
+ static struct sigaction oldsigbus;
+ static void sigbus_handler(int sig) {
+     fprintf(stderr, "\n\n"
+@@ -913,6 +946,15 @@ void reset_sigbus_mmap_warning() {
+         }
+     }
+ }
++#else
++void add_sigbus_mmap_warning() {
++    oldsigbus_valid = 0;
++}
++
++void reset_sigbus_mmap_warning() {
++    oldsigbus_valid = 0;
++}
++#endif
+ 
+ int is_word(const char* cmdline, const char* keyword, char** cptr) {
+     int len = strlen(keyword);
+diff --git a/util/matchfile.c b/util/matchfile.c
+index 816e223..0282652 100644
+--- a/util/matchfile.c
++++ b/util/matchfile.c
+@@ -179,6 +179,10 @@ pl* matchfile_get_matches_for_field(matchfile* mf, int field) {
+         }
+         copy = malloc(sizeof(MatchObj));
+         memcpy(copy, mo, sizeof(MatchObj));
++        if (mo->sip != NULL) {
++            copy->sip = malloc(sizeof(sip_t));
++            memcpy(copy->sip, mo->sip, sizeof(sip_t));
++        }
+         pl_append(list, copy);
+     }
+     return list;
+diff --git a/util/qsort_reentrant.c b/util/qsort_reentrant.c
+index 5f24475..46055c4 100644
+--- a/util/qsort_reentrant.c
++++ b/util/qsort_reentrant.c
+@@ -28,7 +28,7 @@
+  */
+ 
+ // from https://groups.google.com/forum/#!topic/astrometry/quGEbY1CgR8
+-#if __sun
++#if __sun || defined(_WIN32)
+ # include <stdio.h>
+ #else
+ # include <sys/cdefs.h>
+@@ -45,7 +45,7 @@ typedef int             cmp_t(void *, const void *, const void *);
+ static __inline char    *med3(char *, char *, char *, cmp_t *, void *);
+ static __inline void     swapfunc(char *, char *, int, int);
+ 
+-#define min(a, b)       (a) < (b) ? (a) : (b)
++#define QSORT_MIN(a, b) ((a) < (b) ? (a) : (b))
+ 
+ /*
+  * Qsort routine from Bentley & McIlroy's "Engineering a Sort Function".
+@@ -157,9 +157,9 @@ loop:   SWAPINIT(a, es);
+         }
+ 
+         pn = (char *)a + n * es;
+-        r = min(pa - (char *)a, pb - pa);
++        r = QSORT_MIN(pa - (char *)a, pb - pa);
+         vecswap(a, pb - r, r);
+-        r = min(pd - pc, pn - pd - es);
++        r = QSORT_MIN(pd - pc, pn - pd - es);
+         vecswap(pb, pn - r, r);
+         if ((r = pb - pa) > es)
+                 QSORT_R(a, r / es, es, thunk, cmp);
+diff --git a/util/quadfile.c b/util/quadfile.c
+index 9f8f4d5..9b72322 100644
+--- a/util/quadfile.c
++++ b/util/quadfile.c
+@@ -5,6 +5,7 @@
+ 
+ #include <stdio.h>
+ #include <math.h>
++#include <stdlib.h>
+ #include <string.h>
+ #include <assert.h>
+ 
+@@ -280,21 +281,28 @@ int quadfile_write_header_to(quadfile_t* qf, FILE* fid) {
+ 
+ int quadfile_write_quad(quadfile_t* qf, unsigned int* stars) {
+     uint32_t* data;
+-    uint32_t ustars[qf->dimquads];
++    uint32_t* ustars = NULL;
+     int i;
+     fitsbin_chunk_t* chunk = quads_chunk(qf);
+ 
+-    if (sizeof(uint32_t) == sizeof(uint)) {
++    if (sizeof(uint32_t) == sizeof(unsigned int)) {
+         data = stars;
+     } else {
++        ustars = malloc((size_t)qf->dimquads * sizeof(uint32_t));
++        if (!ustars) {
++            ERROR("Failed to allocate temporary quad buffer");
++            return -1;
++        }
+         data = ustars;
+         for (i=0; i<qf->dimquads; i++)
+             ustars[i] = stars[i];
+     }
+     if (fitsbin_write_item(qf->fb, chunk, data)) {
++        free(ustars);
+         ERROR("Failed to write a quad");
+         return -1;
+     }
++    free(ustars);
+     qf->numquads++;
+     return 0;
+ }
+@@ -348,6 +356,3 @@ int quadfile_get_stars(const quadfile_t* qf, unsigned int quadid, unsigned int*
+     }
+     return 0;
+ }
+-
+-
+-
