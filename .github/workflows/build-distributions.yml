@@ -27,7 +27,7 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
-      - run: python -m pip install build twine packaging ruff pyright numpy astropy pytest
+      - run: python -m pip install build twine packaging ruff pyright "setuptools>=77" wheel numpy astropy pytest
       - name: Read active ABI settings
         id: release-targets
         run: |
@@ -44,7 +44,7 @@ jobs:
           print("targets=" + json.dumps(targets))
           PY
       - run: ruff check .
-      - run: pyright --pythonpath python
+      - run: pyright --pythonpath "$(python -c 'import sys; print(sys.executable)')"
       - run: python -m build --sdist
       - run: python .github/scripts/check_distributions.py dist
       - run: python -m twine check --strict dist/*
