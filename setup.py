@@ -80,8 +80,14 @@ class BuildExt(build_ext):
             elif os.environ.get("CIBUILDWHEEL") == "1":
                 raise RuntimeError("SWIG is required for official wheel builds")
 
+            # Distutils mirrors source directories under build_temp; avoid repeating the absolute checkout path.
+            try:
+                source_prefix = Path(os.path.relpath(staging))
+            except ValueError:
+                # A custom Windows build directory on another drive cannot be expressed as a relative path.
+                source_prefix = staging
             for ext in self.extensions:
-                ext.sources = [str(staging / path) for path in ext.sources]
+                ext.sources = [str(source_prefix / path) for path in ext.sources]
                 ext.include_dirs = [str(staging / path) for path in ext.include_dirs]
 
             # MSVC's command line has a 32K limit; use a response file for the large link command.

@@ -76,6 +76,9 @@ and sdist inclusion rules in `MANIFEST.in`; wheel package data is configured sep
 - Patching uses the Python patch applier on a temporary source copy. Never patch or regenerate files in the upstream
   checkout. Preserve exact patch checks, bounded source discovery around upstream symlink cycles, MSVC response files,
   Windows ARM64 toolchain selection, and macOS architecture/tag handling.
+  Keep staged source paths relative to the compiler's working directory when possible: distutils mirrors them beneath
+  the object directory, and repeating the absolute checkout path can exceed MSVC's path limit with free-threaded names.
+  Include paths remain absolute; custom Windows build directories on another drive retain absolute source paths.
 - SWIG is optional for ordinary builds: use the included C wrapper/proxy if absent; if detected, regeneration failure
   must stop the build. `AN_ENGINE_SKIP_SWIG=1` selects included files explicitly; official cibuildwheel builds reject
   that override and require regeneration using the version selected in `pyproject.toml`.
